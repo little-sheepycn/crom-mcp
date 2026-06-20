@@ -1,0 +1,47 @@
+query GetPages {
+  pages(
+    filter: {
+      onWikidotPage: {
+        url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+        category: { eq: "_default" }
+        rating: { gte: 100 }
+      }
+    }
+    sort: { key: WIKIDOT_RATING, order: DESC }
+    first: 10
+  ) {
+    edges {
+      node {
+        url
+        attributions {
+          type
+          user {
+            ... on WikidotUser {
+              displayName
+            }
+          }
+        }
+        alternateTitles {
+          title
+        }
+        ... on WikidotPage {
+          title
+          rating
+          voteCount
+          category
+          tags
+          createdAt
+          commentCount
+          createdBy {
+            displayName
+          }
+        }
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

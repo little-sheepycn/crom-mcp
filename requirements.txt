@@ -1,0 +1,21 @@
+# Crom MCP Server — 直接依赖
+# 安装: pip install -r requirements.txt
+#
+# server.py 直接引用的包:
+mcp>=1.27.2,<2.0.0        # MCP SDK (stdio transport + FastMCP)
+httpx>=0.28.1,<1.0.0      # 异步 HTTP 客户端，用于 GraphQL 请求
+pydantic>=2.13.4,<3.0.0   # 输入校验模型
+
+# --- 以下由 mcp 自动拉取（无需手动指定）---
+# anyio>=4.5
+# httpx-sse>=0.4
+# jsonschema>=4.20.0
+# pydantic-settings>=2.5.2
+# sse-starlette>=1.6.1
+# starlette>=0.27
+# typing-extensions>=4.9.0
+# typing-inspection>=0.4.1
+# uvicorn>=0.31.1           # (非 Windows 平台)
+# pywin32>=310              # (Windows 平台)
+# python-multipart>=0.0.9
+# pyjwt[crypto]>=2.10.1

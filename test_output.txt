@@ -1,0 +1,36 @@
+# SCP-CN-001-J
+URL: http://scp-wiki-cn.wikidot.com/scp-cn-001-j
+
+## Wikidot 源码 (source)
+```
+[[module CSS]]
+#page-title {
+  display: none;
+}
+
+.meta-title {
+  border-bottom: solid 1px #bbbbbb;
+  color: #990011;
+  font-weight: normal;
+  margin: 0 0 0.6em;
+  padding: 0 0 0.25em;
+  font-size: 200%;
+}
+
+.meta-title p {
+  margin: 0;
+}
+[[/module]]
+
+
+[[module ListPages category="*" name="log-of-extranormal-events-c*" limit="1" order="name" offset="@URL|0"]]
+
+[[div class="meta-title"]]
+%%title%%
+[[/div]]
+
+%%content%%
+[[/module]]
+```
+
+源码长度: 431 字符

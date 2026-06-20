@@ -1,0 +1,265 @@
+# ============================================================
+# Crom API v2 — 按标题查询页面
+# Endpoint: https://apiv2.crom.avn.sh/graphql
+# ============================================================
+
+# ----------------------------------------------------------
+# 示例 1：精确匹配标题（大小写不敏感）
+# ----------------------------------------------------------
+query GetPageByTitleExact {
+  pages(
+    filter: {
+      onWikidotPage: {
+        title: { eqLower: "scp-cn-001" }
+      }
+    }
+    first: 5
+  ) {
+    edges {
+      node {
+        url
+        ... on WikidotPage {
+          title
+          rating
+          voteCount
+          category
+          tags
+          createdAt
+          createdBy {
+            displayName
+          }
+        }
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}
+
+# ----------------------------------------------------------
+# 示例 2：标题前缀匹配（模糊搜索，大小写不敏感）
+# ----------------------------------------------------------
+# query GetPagesByTitlePrefix {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         title: { startsWithLower: "scp-cn" }
+#       }
+#     }
+#     sort: { key: WIKIDOT_TITLE, order: ASC }
+#     first: 20
+#   ) {
+#     edges {
+#       node {
+#         url
+#         ... on WikidotPage {
+#           title
+#           rating
+#           createdAt
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#       endCursor
+#     }
+#   }
+# }
+
+# ----------------------------------------------------------
+# 示例 3：限定站点 + 标题精确匹配
+# ----------------------------------------------------------
+# query GetPageByTitleOnSite {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+#         title: { eqLower: "scp-cn-001" }
+#       }
+#     }
+#     first: 5
+#   ) {
+#     edges {
+#       node {
+#         url
+#         ... on WikidotPage {
+#           title
+#           rating
+#           voteCount
+#           category
+#           tags
+#           createdAt
+#           createdBy {
+#             displayName
+#           }
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#     }
+#   }
+# }
+
+# ----------------------------------------------------------
+# 示例 4：限定站点 + 标题前缀模糊匹配
+# ----------------------------------------------------------
+# query GetPagesByTitlePrefixOnSite {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+#         title: { startsWithLower: "scp-cn-3" }
+#       }
+#     }
+#     sort: { key: WIKIDOT_TITLE, order: ASC }
+#     first: 20
+#   ) {
+#     edges {
+#       node {
+#         url
+#         ... on WikidotPage {
+#           title
+#           rating
+#           voteCount
+#           createdAt
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#       endCursor
+#     }
+#   }
+# }
+
+# ----------------------------------------------------------
+# 示例 5：标题排除 + 精确匹配（不等于某个标题）
+# ----------------------------------------------------------
+# query GetPagesByTitleNotEqual {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         title: { neqLower: "scp-cn-001" }
+#         url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+#         rating: { gte: 100 }
+#       }
+#     }
+#     sort: { key: WIKIDOT_RATING, order: DESC }
+#     first: 10
+#   ) {
+#     edges {
+#       node {
+#         url
+#         ... on WikidotPage {
+#           title
+#           rating
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#       endCursor
+#     }
+#   }
+# }
+
+# ----------------------------------------------------------
+# 示例 6：标题 + 作者组合查询
+# ----------------------------------------------------------
+# query GetPageByTitleAndAuthor {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         title: { eqLower: "scp-cn-001" }
+#         url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+#       }
+#       attributions: {
+#         type: { eq: AUTHOR }
+#         user: { displayName: { eqLower: "你的作者名" } }
+#       }
+#     }
+#     first: 5
+#   ) {
+#     edges {
+#       node {
+#         url
+#         ... on WikidotPage {
+#           title
+#           rating
+#           createdAt
+#           createdBy {
+#             displayName
+#           }
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#     }
+#   }
+# }
+
+# ----------------------------------------------------------
+# 示例 7：完整字段 — 通过标题获取页面全部信息
+# ----------------------------------------------------------
+# query GetPageByTitleFull {
+#   pages(
+#     filter: {
+#       onWikidotPage: {
+#         title: { eqLower: "scp-cn-001" }
+#         url: { startsWith: "http://scp-wiki-cn.wikidot.com/" }
+#       }
+#     }
+#     first: 1
+#   ) {
+#     edges {
+#       node {
+#         url
+#         attributions {
+#           type
+#           user {
+#             ... on WikidotUser {
+#               displayName
+#               wikidotId
+#             }
+#           }
+#         }
+#         alternateTitles {
+#           title
+#         }
+#         ... on WikidotPage {
+#           wikidotId
+#           title
+#           rating
+#           voteCount
+#           category
+#           tags
+#           createdAt
+#           revisionCount
+#           commentCount
+#           isHidden
+#           isUserPage
+#           createdBy {
+#             displayName
+#           }
+#           thumbnailUrl
+#           parent {
+#             url
+#           }
+#         }
+#       }
+#       cursor
+#     }
+#     pageInfo {
+#       hasNextPage
+#     }
+#   }
+# }
