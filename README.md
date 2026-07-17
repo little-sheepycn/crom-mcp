@@ -69,7 +69,7 @@ uv pip install -r requirements.txt
 | `scp-int` | SCP-INT | `http://scp-int.wikidot.com/` |
 | `scp-ru` | SCP-RU | `http://scp-ru.wikidot.com/` |
 | `scp-fr` | SCP-FR | `http://fondationscp.wikidot.com/` |
-| `wanderers` | 流浪者图书馆 | `http://wanderers-library.wikidot.com/` |
+| `wanderers` | 被放逐者之图书馆 | `http://wanderers-library.wikidot.com/` |
 | `backrooms` | 后室 | `http://backrooms-wiki.wikidot.com/` |
 
 ## 技术栈
