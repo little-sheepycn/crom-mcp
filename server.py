@@ -349,6 +349,25 @@ class CromUnifiedSearchInput(BaseModel):
     limit: int = Field(default=10, description="返回条数", ge=1, le=100)
 
 
+class CromGetChildPagesInput(BaseModel):
+    """获取子页面列表的输入参数。
+
+    子页面是 Wikidot 中通过 parent 字段关联到当前页面的页面，
+    常用于系列文章（如 SCP 系列、故事集等）的子集导航。
+    """
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    url: str = Field(
+        ...,
+        description="父页面的完整 Wikidot URL，例如 'http://scp-wiki-cn.wikidot.com/scp-cn-001'。注意必须用 http://。",
+        min_length=10, max_length=500,
+    )
+    detail_level: DetailLevel = Field(
+        default=DetailLevel.BASIC,
+        description="信息详细程度: 'basic' 返回基本信息+作者（默认），'full' 返回全部字段",
+    )
+
+
 # ============================================================
 # 共享工具函数
 # ============================================================
@@ -380,75 +399,81 @@ def _resolve_fields(detail_level: DetailLevel) -> list[str]:
     return BASIC_PLUS_AUTHOR_FIELDS
 
 
-def _build_graphql_selection(fields: list[str]) -> str:
-    """根据字段列表构建 GraphQL 选择片段。"""
+def _build_graphql_selection(fields: list[str], base_indent: int = 8) -> str:
+    """根据字段列表构建 GraphQL 选择片段。
+
+    base_indent 控制顶层缩进（空格数），默认为 8（用于 pages 查询的 node 级别）。
+    当用于 children 等嵌套场景时，传入 base_indent=10。
+    """
+    ind1 = " " * base_indent       # 顶层字段 / 块开始
+    ind2 = " " * (base_indent + 2) # 子字段
+    ind3 = " " * (base_indent + 4) # 孙字段
+    ind4 = " " * (base_indent + 6) # 曾孙字段
+
     parts = []
 
     # 接口字段
     interface = [f for f in fields if f in INTERFACE_FIELDS]
     if "attributions" in interface:
         interface.remove("attributions")
-        parts.append("""
-        attributions {
-          type
-          user {
-            ... on WikidotUser {
-              displayName
-              wikidotId
-            }
-          }
-        }""")
+        parts.append(f"""{ind1}attributions {{
+{ind2}type
+{ind2}user {{
+{ind3}... on WikidotUser {{
+{ind4}displayName
+{ind4}wikidotId
+{ind3}}}
+{ind2}}}
+{ind1}}}""")
     if "alternateTitles" in interface:
         interface.remove("alternateTitles")
-        parts.append("""
-        alternateTitles {
-          title
-        }""")
+        parts.append(f"""{ind1}alternateTitles {{
+{ind2}title
+{ind1}}}""")
     if "latestDiaryEntry" in interface:
         interface.remove("latestDiaryEntry")
-        parts.append("""
-        latestDiaryEntry {
-          id
-          title
-          createdAt
-        }""")
+        parts.append(f"""{ind1}latestDiaryEntry {{
+{ind2}id
+{ind2}title
+{ind2}createdAt
+{ind1}}}""")
     for f in interface:
         if f != "url":
-            parts.append(f"        {f}")
+            parts.append(f"{ind1}{f}")
 
     # WikidotPage 特化字段 — 全部合并到单个 inline fragment
     wikidot_body = []
 
     scalars = [f for f in fields if f in WIKIDOT_SCALARS]
     for f in scalars:
-        wikidot_body.append(f"          {f}")
+        wikidot_body.append(f"{ind2}{f}")
 
     if "createdBy" in fields:
-        wikidot_body.append("""          createdBy {
-            displayName
-            wikidotId
-          }""")
+        wikidot_body.append(f"""{ind2}createdBy {{
+{ind3}displayName
+{ind3}wikidotId
+{ind2}}}""")
     if "parent" in fields:
-        wikidot_body.append("""          parent {
-            url
-          }""")
+        wikidot_body.append(f"""{ind2}parent {{
+{ind3}url
+{ind2}}}""")
     if "children" in fields:
-        wikidot_body.append("""          children {
-            url
-          }""")
+        wikidot_body.append(f"""{ind2}children {{
+{ind3}url
+{ind2}}}""")
     if "thread" in fields:
-        wikidot_body.append("""          thread {
-            threadId
-            title
-            postCount
-            createdAt
-          }""")
+        wikidot_body.append(f"""{ind2}thread {{
+{ind3}threadId
+{ind3}title
+{ind3}postCount
+{ind3}createdAt
+{ind2}}}""")
 
     if wikidot_body:
         body = "\n".join(wikidot_body)
-        parts.append(f"""        ... on WikidotPage {{
+        parts.append(f"""{ind1}... on WikidotPage {{
 {body}
-        }}""")
+{ind1}}}""")
 
     return "\n".join(parts)
 
@@ -770,6 +795,115 @@ async def crom_get_page(params: CromGetPageInput) -> str:
         lines.append(f"评论数: {node_data.get('commentCount', '-')} | 修订: {node_data.get('revisionCount', '-')}")
         lines.append(f"论坛: {node_data.get('thread', '-')}")
         lines.append(f"摘要: {node_data.get('summary', '-')}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="crom_get_child_pages",
+    annotations={
+        "title": "获取页面的子页面列表",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    }
+)
+async def crom_get_child_pages(params: CromGetChildPagesInput) -> str:
+    """
+    获取指定 Wikidot 页面的所有子页面（children pages）。
+
+    子页面是 Wikidot 中通过 parent 字段指向当前页面的页面。
+    常用于系列文章（如 SCP 系列、故事集、中心页等）的子集导航。
+
+    默认返回基本信息+作者。设置 detail_level='full' 可获得全部字段。
+
+    注意：Wikidot URL 必须使用 http:// 前缀。
+    """
+    fields = _resolve_fields(params.detail_level)
+    child_fields = _build_graphql_selection(fields, base_indent=10)
+
+    query = f'''query CromGetChildPages {{
+  page(url: "{params.url}") {{
+    url
+    ... on WikidotPage {{
+      title
+      children {{
+          url
+{child_fields}
+      }}
+    }}
+  }}
+}}'''
+
+    try:
+        result = await _gql_request(query)
+    except RuntimeError as e:
+        return f"查询失败: {e}"
+
+    if "errors" in result:
+        err_msgs = [e.get("message", str(e)) for e in result["errors"]]
+        return f"GraphQL 错误: {'; '.join(err_msgs)}"
+
+    page = result.get("data", {}).get("page")
+    if not page:
+        return f"未找到页面: {params.url}"
+
+    parent_title = page.get("title", "") or page.get("url", "未知页面")
+    children = page.get("children") or []
+
+    if not children:
+        return (
+            f"# 子页面: {parent_title}\n"
+            f"父页面 URL: {params.url}\n\n"
+            f"该页面没有子页面。\n\n"
+            f"*提示: 某些页面类型（如非 WikidotPage）可能不支持子页面查询。*"
+        )
+
+    # 格式化每个子页面
+    level_label = "完整" if params.detail_level == DetailLevel.FULL else "基本信息+作者"
+    lines = [
+        f"# 子页面列表: {parent_title}",
+        f"父页面 URL: {params.url}",
+        f"共 {len(children)} 个子页面 | 详情: {level_label}",
+        "",
+    ]
+
+    for i, child in enumerate(children):
+        data = _format_page_node(child, fields)
+        title = data.get("title", "-")
+        rating = data.get("rating", "-")
+        url = data.get("url", "")
+        category = data.get("category", "-")
+        created = data.get("createdAt", "-")
+        author = data.get("createdBy", "-")
+        votes = data.get("voteCount", "-")
+
+        lines.append(f"## {i + 1}. {title}")
+        lines.append(f"URL: {url}")
+        lines.append(f"评分: {rating} | 投票: {votes} | 分类: {category} | 创建: {created}")
+        if author != "-":
+            lines.append(f"作者: {author}")
+        if data.get("attributions", "-") not in ("-", ""):
+            lines.append(f"归属: {data['attributions']}")
+
+        if params.detail_level == DetailLevel.FULL:
+            if "tags" in data and data["tags"] not in ("-", ""):
+                lines.append(f"标签: {data['tags']}")
+            if "commentCount" in data:
+                lines.append(f"评论: {data.get('commentCount', '-')} | 修订: {data.get('revisionCount', '-')}")
+            if "alternateTitles" in data and data["alternateTitles"] != "-":
+                lines.append(f"替代标题: {data['alternateTitles']}")
+            if "thumbnailUrl" in data and data["thumbnailUrl"] not in ("-", ""):
+                lines.append(f"缩略图: {data['thumbnailUrl']}")
+            if "summary" in data and data["summary"] != "-":
+                lines.append(f"摘要: {data['summary']}")
+
+        lines.append("")
+
+    lines.append("---")
+    if params.detail_level == DetailLevel.BASIC:
+        lines.append("*如需查看完整信息（标签、摘要等），请用 detail_level='full' 重新查询。*")
 
     return "\n".join(lines)
 
