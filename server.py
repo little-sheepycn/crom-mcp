@@ -10,6 +10,7 @@ Endpoint: https://apiv2.crom.avn.sh/graphql
 
 import json
 import ssl
+import argparse
 from enum import Enum
 from typing import Optional
 
@@ -1778,4 +1779,41 @@ async def crom_get_top_authors(params: CromTopAuthorsInput) -> str:
 # ============================================================
 
 if __name__ == "__main__":
-    mcp.run()
+    parser = argparse.ArgumentParser(description="Crom MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="MCP 传输方式，默认 stdio；streamable-http 会启动 HTTP 服务",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="streamable-http 监听地址（默认 127.0.0.1）",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="streamable-http 监听端口（默认 8000）",
+    )
+    args = parser.parse_args()
+
+    if args.transport == "streamable-http":
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+
+        if args.host not in ("127.0.0.1", "localhost", "::1"):
+            security = getattr(mcp.settings, "transport_security", None)
+            if security is not None:
+                security.enable_dns_rebinding_protection = False
+                logger.warning(
+                    "Disabled DNS rebinding protection for non-loopback host %s",
+                    args.host,
+                )
+
+        endpoint = f"http://{args.host}:{args.port}{mcp.settings.streamable_http_path}"
+        print(f"Crom MCP streamable HTTP endpoint: {endpoint}", file=sys.stderr, flush=True)
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()

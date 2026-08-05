@@ -2,7 +2,7 @@
 # 安装: pip install -r requirements.txt
 #
 # server.py 直接引用的包:
-mcp>=1.27.2,<2.0.0        # MCP SDK (stdio transport + FastMCP)
+mcp>=1.27.2,<2.0.0        # MCP SDK (stdio / streamable-http transport + FastMCP)
 httpx>=0.28.1,<1.0.0      # 异步 HTTP 客户端，用于 GraphQL 请求
 pydantic>=2.13.4,<3.0.0   # 输入校验模型
 
