@@ -8,17 +8,20 @@ Endpoint: https://apiv2.crom.avn.sh/graphql
 当用户需要更多信息时，设置 detail_level="full" 获取完整字段。
 """
 
-import json
-import ssl
 import argparse
+import html
+import json
+import logging
+import re
+import ssl
+import sys
+import urllib.parse
 from enum import Enum
 from typing import Optional
 
 import httpx
-from pydantic import BaseModel, Field, ConfigDict
 from mcp.server.fastmcp import FastMCP
-import logging
-import sys
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---- 日志输出到 stderr，避免干扰 stdio 协议 ----
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
@@ -29,6 +32,10 @@ mcp = FastMCP("crom_mcp")
 
 ENDPOINT = "https://apiv2.crom.avn.sh/graphql"
 PAGE_SIZE = 10
+
+# Crom Aviary — 生成页面分享卡片（Discord 预览图）的服务
+AVIARY_BASE = "https://crom.avn.sh"
+AVIARY_PAGE_PATH = "/aviary/page"
 
 # ============================================================
 # 字段定义
@@ -369,6 +376,17 @@ class CromGetChildPagesInput(BaseModel):
     )
 
 
+class CromPagePreviewInput(BaseModel):
+    """获取页面 Discord 分享预览（Crom Aviary）的输入参数。"""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    url: str = Field(
+        ...,
+        description="目标页面的完整 Wikidot URL，例如 'http://scp-wiki-cn.wikidot.com/scp-cn-001'。注意必须用 http://（https:// 会自动转换）。",
+        min_length=10, max_length=500,
+    )
+
+
 # ============================================================
 # 共享工具函数
 # ============================================================
@@ -625,6 +643,72 @@ def _field_label(f: str) -> str:
         "latestDiaryEntry": "日记",
     }
     return labels.get(f, f)
+
+
+# ============================================================
+# Crom Aviary 辅助函数（Discord 分享预览）
+# ============================================================
+
+def _normalize_wikidot_url(url: str) -> str:
+    """Wikidot 链接统一为 http:// 形式。
+
+    Aviary 只认 http://（https:// 会 302 到 http:// 版本）。
+    """
+    return re.sub(r"^https://", "http://", url.strip(), count=1)
+
+
+def _extract_meta_content(html_text: str, name: str) -> Optional[str]:
+    """从 Aviary SSR HTML 中提取 <meta name="..." content="..."> 的值并反转义实体。
+
+    og:image 的 content 内含有 &amp;sig= 之类的 HTML 实体，
+    必须 unescape 之后才是可直接访问的 URL。
+    """
+    for pattern in (
+        rf'<meta[^>]+name="{re.escape(name)}"[^>]+content="([^"]*)"',
+        rf'<meta[^>]+content="([^"]*)"[^>]+name="{re.escape(name)}"',
+    ):
+        m = re.search(pattern, html_text)
+        if m:
+            return html.unescape(m.group(1))
+    return None
+
+
+def _decode_embed_data(og_image_url: str) -> dict:
+    """解码预览图 URL 中 _embed?data=... 携带的 JSON 内容。"""
+    raw = urllib.parse.parse_qs(
+        urllib.parse.urlsplit(og_image_url).query
+    ).get("data", [""])[0]
+    try:
+        return json.loads(urllib.parse.unquote(raw))
+    except (ValueError, TypeError):
+        return {}
+
+
+async def _aviary_request(page_url: str) -> str:
+    """GET Crom Aviary 预览页并返回 HTML 文本。失败抛出 RuntimeError。"""
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        try:
+            resp = await client.get(
+                f"{AVIARY_BASE}{AVIARY_PAGE_PATH}",
+                params={"url": _normalize_wikidot_url(page_url)},
+                headers={"Accept": "text/html"},
+            )
+            resp.raise_for_status()
+            return resp.text
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Aviary HTTP error: {e.response.status_code} - {e.response.text[:200]}"
+            )
+            raise RuntimeError(f"Aviary 请求失败: HTTP {e.response.status_code}")
+        except httpx.TimeoutException:
+            raise RuntimeError("Aviary 请求超时，请稍后重试。")
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Aviary 网络错误: {e}")
+
+
+def _aviary_share_url(page_url: str) -> str:
+    """构造 Aviary 预览页分享链接。"""
+    return f"{AVIARY_BASE}{AVIARY_PAGE_PATH}?url={urllib.parse.quote(_normalize_wikidot_url(page_url), safe='')}"
 
 
 # ============================================================
@@ -1152,6 +1236,83 @@ async def crom_get_page_source(params: CromPageSourceInput) -> str:
     if text_content:
         lines.append(f"纯文本长度: {len(text_content)} 字符")
 
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="crom_get_page_preview",
+    annotations={
+        "title": "获取页面的 Discord 分享预览卡片（Aviary）",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    }
+)
+async def crom_get_page_preview(params: CromPagePreviewInput) -> str:
+    """
+    获取指定 Wikidot 页面在 Discord 等平台分享时的预览卡片链接（由 Crom Aviary 生成）。
+
+    返回两项内容:
+    1. Aviary 页面链接 — Aviary 预览页（浏览器中查看卡片效果，也可用于转发分享）
+    2. Discord 预览图链接 — 800x450 分享卡片图片 URL（带服务端签名），
+       直接粘贴到 Discord 消息中即可显示带标题/描述/缩略图的预览卡片
+
+    Aviary 会自动抓取页面内容，决定卡片的标题、描述与缩略图，无需手工指定。
+    预览图 URL 由 Aviary 服务端签名（sig 参数），无法离线自行构造，因此必须实时获取。
+    注意: Wikidot URL 必须使用 http:// 前缀（https:// 会自动转换）。
+    """
+    share_url = _aviary_share_url(params.url)
+
+    try:
+        page_html = await _aviary_request(params.url)
+    except RuntimeError as e:
+        return f"查询失败: {e}"
+
+    og_title = _extract_meta_content(page_html, "og:title") or ""
+    og_image = _extract_meta_content(page_html, "og:image") or ""
+    og_desc = _extract_meta_content(page_html, "og:description") or ""
+
+    if not og_image:
+        if "Page not found" in og_title:
+            return (
+                f"# 页面预览不可用\n"
+                f"Aviary 中找不到页面 {params.url}，无法生成预览卡片。\n"
+                f"请确认 URL 正确且该站点已被 Crom 收录。"
+            )
+        return (
+            f"# 页面预览不可用\n"
+            f"Aviary 未能为 {params.url} 生成预览卡片（返回页面缺少 og:image）。"
+        )
+
+    data = _decode_embed_data(og_image)
+    display_title = (data.get("title") or og_title).replace(
+        " - Crom Aviary", ""
+    ).strip()
+
+    lines = [
+        f"# Discord 预览卡片: {display_title or params.url}",
+        "",
+        f"- **Aviary 链接**: {share_url}",
+        f"- **Discord 预览图**: {og_image}",
+        "",
+    ]
+    card_parts = []
+    if data.get("title"):
+        card_parts.append(f"标题: {data['title']}")
+    if data.get("description") or og_desc:
+        card_parts.append(f"描述: {data.get('description') or og_desc}")
+    if data.get("thumbnailUrl"):
+        card_parts.append(f"缩略图: {data['thumbnailUrl']}")
+    if card_parts:
+        lines.append("**卡片内容**")
+        lines.extend(f"- {p}" for p in card_parts)
+        lines.append("")
+
+    lines.append(
+        "*用法: 将「Discord 预览图」链接粘贴到 Discord 消息中即显示预览卡片；"
+        "Aviary 链接可在浏览器中查看并转发。*"
+    )
     return "\n".join(lines)
 
 
